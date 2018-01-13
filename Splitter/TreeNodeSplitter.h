@@ -25,14 +25,8 @@ class TreeNodeSplitter {
             const TreeParams &params,
             Maths &util) {
     split_manipulator.reserve(num_threads);
-    if (params.cost_function == GiniCost) {
-      for (uint32_t idx = 0; idx != num_threads; ++idx)
-        split_manipulator.emplace_back(dataset, params, util);
-    }
-    if (params.cost_function == EntropyCost) {
-      for (uint32_t idx = 0; idx != num_threads; ++idx)
-        split_manipulator.emplace_back(dataset, params, util);
-    }
+    for (uint32_t idx = 0; idx != num_threads; ++idx)
+      split_manipulator.emplace_back(dataset, params, util);
   }
 
   void CleanUp() {
