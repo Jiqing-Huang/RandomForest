@@ -9,9 +9,9 @@ static const double FloatError = 1e-10;
 
 // Performance tuning paramters
 static const float SubsetToSortRatio = 4.0;
-static const float MemorySavingFactor = 3;
+static const float MemorySavingFactor = 3.0;
 static const uint32_t MaxNumSampleForSerialBuild = 10000;
-static const uint32_t MaxNumSampleForSerialSplit = 30000;
+static const uint32_t MaxNumSampleForSerialSplit = 50000;
 static const uint32_t MaxNumBinsForBruteSplitter = 8;
 static const uint32_t MaxNumBinsForSampling = 16;
 
@@ -31,16 +31,22 @@ static const uint32_t GetMaskShift = 31;
 static const uint32_t NumBitsPerWord = 32;
 
 // tree node bitmask
-static const uint32_t IsRoot = 0x80000000;
-static const uint32_t IsLeftChild = 0x40000000;
-static const uint32_t IsRightChild = 0x20000000;
-static const uint32_t IsParallelBuilding = 0x10000000;
-static const uint32_t IsParallelSplitting = 0x08000000;
+static const uint32_t IsRootType = 0x80000000;
+static const uint32_t IsLeftChildType = 0x40000000;
+static const uint32_t IsRightChildType = 0x20000000;
+static const uint32_t IsParallelBuildingType = 0x10000000;
+static const uint32_t IsParallelSplittingType = 0x08000000;
 
 // Cost Function ID
-static const uint32_t UndefinedCost = 0x0;
-static const uint32_t EntropyCost = 0x1;
-static const uint32_t GiniCost = 0x2;
+static const uint32_t UndefinedCost = 0;
+static const uint32_t Entropy = 1;
+static const uint32_t GiniImpurity = 2;
+static const uint32_t Variance = 3;
+
+// Predict Options
+static const uint32_t PredictAll = 0;
+static const uint32_t PredictPresent = 1;
+static const uint32_t PredictAbsent = 2;
 
 // job type flag
 static const uint32_t AllFinished = UINT32_MAX;
