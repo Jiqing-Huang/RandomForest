@@ -8,40 +8,22 @@ using std::ref;
 using std::copy;
 using std::make_unique;
 
-#include <iostream>
-using std::cout;
-using std::endl;
-
 void ParallelTreeBuilder::Build(StoredTree &tree) {
-  if (params.cost_function == GiniCost)
-    splitter_ptr.gini_splitter->Init(num_threads, *dataset, params, util);
-  if (params.cost_function == EntropyCost)
-    splitter_ptr.entropy_splitter->Init(num_threads, *dataset, params, util);
-  tree.Init(dataset->num_numerical_features, dataset->num_discrete_features, num_threads);
-  SetupRoot(tree);
+  Init(num_threads, tree);
+  nodes[node_top++] = make_unique<ParallelTreeNode>(dataset);
+
   jobs.resize(params.max_num_node * (params.num_features_for_split + 2));
   jobs[job_end++] = Job(ToSplitRawNode, 0);
-
   vector<thread> thread_pool;
   thread_pool.reserve(num_threads);
-
   for (uint32_t thread_id = 0; thread_id != num_threads; ++thread_id)
     thread_pool.emplace_back(thread(&ParallelTreeBuilder::ParallelBuild, this, thread_id, ref(tree)));
-
   unique_lock<mutex> lock(main_thread);
   while (!finish)
     cv_finish.wait(lock);
-
   for (auto &thread: thread_pool)
     thread.join();
-
   CleanUp(tree);
-}
-
-void ParallelTreeBuilder::SetupRoot(StoredTree &tree) {
-  tree.Resize(params.max_num_cell, params.max_num_leaf);
-  nodes.resize(params.max_num_node);
-  nodes[node_top++] = make_unique<ParallelTreeNode>(*dataset, util);
 }
 
 void ParallelTreeBuilder::CleanUp(StoredTree &tree) {
@@ -60,13 +42,13 @@ void ParallelTreeBuilder::ParallelBuild(uint32_t thread_id,
     if (job.type == AllFinished) continue;
     auto *node = dynamic_cast<ParallelTreeNode *>(nodes[job.node_id].get());
     if (job.type == ToSplitRawNode) {
-      node->SetToParallelBuilding(thread_id);
+      node->SetParallelBuilding(thread_id);
       SplitRawNode(job, tree);
     } else if (job.type == ToSplitProcessedNode) {
-      node->SetToParallelBuilding(thread_id);
+      node->SetParallelBuilding(thread_id);
       SplitProcessedNode(job, tree);
     } else {
-      node->SetToParallelSplitting(thread_id, job.type);
+      node->SetParallelSplitting(thread_id, job.type);
       ParallelSplitOnFeature(job);
     }
   }
@@ -76,7 +58,7 @@ void ParallelTreeBuilder::ParallelBuild(uint32_t thread_id,
 
 void ParallelTreeBuilder::SplitRawNode(Job &job,
                                        StoredTree &tree) {
-  if (nodes[job.node_id]->size <= MaxNumSampleForSerialBuild) {
+  if (nodes[job.node_id]->Size() <= MaxNumSampleForSerialBuild) {
     BuildAllNodes(job.node_id, tree);
     job.SetToIdle();
   } else {
@@ -88,23 +70,24 @@ void ParallelTreeBuilder::BuildOneNode(Job &job,
                                        StoredTree &tree) {
 
   auto *node = dynamic_cast<ParallelTreeNode *>(nodes[job.node_id].get());
-  if (tree.max_depth < node->depth) tree.max_depth = node->depth;
+  if (tree.max_depth < node->Depth())
+    tree.max_depth = node->Depth();
 
-  node->GetStats(*dataset, params, util);
-  bool splittable = node->stats->cost > FloatError &&
-                    node->stats->num_samples >= params.min_split_node &&
-                    node->depth < params.max_depth;
+  node->SetStats(dataset, params.cost_function);
+  bool splittable = node->Stats()->Cost() > FloatError &&
+                    node->Stats()->EffectiveNumSamples(params.cost_function) >= params.effective_min_split_node &&
+                    node->Depth() < params.max_depth;
 
   if (splittable) {
-    if (node->size > MaxNumSampleForSerialSplit) {
+    if (node->Size() > MaxNumSampleForSerialSplit) {
       AddSplitJobs(node);
       job.SetToIdle();
       return;
     }
     GetBestSplit(node);
   } else {
-    node->GetEmptySplitInfo();
-    node->split_info->type = IsLeaf;
+    node->InitSplitInfo();
+    node->Split()->type = IsLeaf;
   }
   SplitProcessedNode(job, tree);
 }
@@ -112,73 +95,59 @@ void ParallelTreeBuilder::BuildOneNode(Job &job,
 void ParallelTreeBuilder::SplitProcessedNode(Job &job,
                                              StoredTree &tree) {
   TreeNode *node = nodes[job.node_id].get();
-  if (node->split_info->type == IsLeaf) {
+  if (node->Split()->type == IsLeaf) {
     PrepareLeaf(node, tree);
     job.SetToIdle();
   } else {
     PrepareCell(node, tree);
-    if (node->left->size > node->right->size) {
-      AddJob(Job(ToSplitRawNode, node->right->node_id));
-      job = Job(ToSplitRawNode, node->left->node_id);
+    if (node->Left()->Size() > node->Right()->Size()) {
+      AddJob(Job(ToSplitRawNode, node->Right()->NodeId()));
+      job = Job(ToSplitRawNode, node->Left()->NodeId());
     } else {
-      AddJob(Job(ToSplitRawNode, node->left->node_id));
-      job = Job(ToSplitRawNode, node->right->node_id);
+      AddJob(Job(ToSplitRawNode, node->Left()->NodeId()));
+      job = Job(ToSplitRawNode, node->Right()->NodeId());
     }
   }
 }
 
 void ParallelTreeBuilder::AddSplitJobs(ParallelTreeNode *node) {
-  node->thread_id_splitter.resize(dataset->num_features, UINT32_MAX);
-  node->GetEmptySplitInfo();
-  util.SampleWithoutReplacement(dataset->num_features, params.num_features_for_split, feature_set);
+  node->InitParallelSplitting(dataset->Meta().num_features);
+  node->InitSplitInfo();
+  const vector<uint32_t> &feature_set = ShuffleFeatures(node);
   vector<Job> jobs_to_add;
   jobs_to_add.reserve(params.num_features_for_split);
   for (uint32_t idx = 0; idx != params.num_features_for_split; ++idx)
-    jobs_to_add.emplace_back(feature_set[idx], node->node_id);
+    jobs_to_add.emplace_back(feature_set[idx], node->NodeId());
   AddJobs(jobs_to_add, params.num_features_for_split);
 }
 
 void ParallelTreeBuilder::ParallelSplitOnFeature(Job &job) {
   TreeNode *node = nodes[job.node_id].get();
-  uint32_t feature = job.type;
-  uint32_t feature_type, feature_idx;
-  GetFeatureTypeAndIndex(feature, feature_type, feature_idx);
-  if (params.cost_function == GiniCost) {
-    GiniSplitter &splitter = *splitter_ptr.gini_splitter;
-    SplitOnFeature(feature_type, feature_idx, node, splitter);
-  }
-  if (params.cost_function == EntropyCost) {
-    EntropySplitter &splitter = *splitter_ptr.entropy_splitter;
-    SplitOnFeature(feature_type, feature_idx, node, splitter);
-  }
+  uint32_t feature_idx = job.type;
+  Split(dataset->FeatureType(feature_idx), feature_idx, node);
   unique_lock<mutex> lock(add_processed_node);
-  if (node->split_info && node->split_info->num_updates == params.num_features_for_split) {
-    node->split_info->num_updates = 0;
-    node->split_info->FinishUpdate();
+  if (node->Split() && node->Split()->num_updates == params.num_features_for_split) {
+    node->Split()->num_updates = 0;
+    node->Split()->FinishUpdate();
     AddJob(Job(ToSplitProcessedNode, job.node_id));
   }
   lock.unlock();
   job.SetToIdle();
 }
 
-void ParallelTreeBuilder::InsertChildNodes(TreeNode *node,
-                                           vector<uint32_t> &sample_ids_left,
-                                           vector<uint32_t> &sample_ids_right,
-                                           vector<uint32_t> &labels_left,
-                                           vector<uint32_t> &labels_right,
-                                           vector<uint32_t> &sample_weights_left,
-                                           vector<uint32_t> &sample_weights_right) {
+void ParallelTreeBuilder::InsertChildNodes(TreeNode *node) {
   uint32_t left_child_id = node_top++;
   uint32_t right_child_id = node_top++;
-  auto *parallel_node = dynamic_cast<ParallelTreeNode *>(node);
-  nodes[left_child_id] = make_unique<ParallelTreeNode>(left_child_id, IsLeftChild | IsParallelBuilding, node->depth + 1,
-                                                       parallel_node, *dataset, move(sample_ids_left),
-                                                       move(labels_left), move(sample_weights_left));
-  nodes[right_child_id] = make_unique<ParallelTreeNode>(right_child_id, IsRightChild | IsParallelBuilding, node->depth + 1,
-                                                        parallel_node, *dataset, move(sample_ids_right),
-                                                        move(labels_right), move(sample_weights_right));
-  node->left = nodes[left_child_id].get();
-  node->right = nodes[right_child_id].get();
+  auto *parallel_node = dynamic_cast<ParallelTreeNode*>(node);
+  assert(parallel_node);
+  nodes[left_child_id] = make_unique<ParallelTreeNode>(left_child_id, IsLeftChildType | IsParallelBuildingType,
+                                                       parallel_node);
+  nodes[right_child_id] = make_unique<ParallelTreeNode>(right_child_id, IsRightChildType | IsParallelBuildingType,
+                                                        parallel_node);
+  auto *left = dynamic_cast<ParallelTreeNode*>(nodes[left_child_id].get());
+  auto *right = dynamic_cast<ParallelTreeNode*>(nodes[right_child_id].get());
+  node->LinkChildren(left, right);
+  node->PartitionSubset(dataset, left, right);
 }
 
 void ParallelTreeBuilder::GetJob(Job &job) {

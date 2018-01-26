@@ -3,6 +3,7 @@
 #define DECISIONTREE_PARALLELTREEBUILDER_H
 
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 #include <condition_variable>
 
@@ -35,18 +36,21 @@ class ParallelTreeBuilder: public TreeBuilder {
     uint32_t type;
     uint32_t node_id;
 
-    Job():
-            type(0), node_id(0) {}
+    Job() {
+      memset(this, 0, sizeof(Job));
+    }
 
     Job(uint32_t type,
         uint32_t node_id):
             type(type), node_id(node_id) {}
 
-    Job(const Job &job) = default;
+    Job(const Job &job) {
+      memcpy(this, &job, sizeof(Job));
+    }
 
     Job &operator=(const Job &job) {
-      type = job.type;
-      node_id = job.node_id;
+      memcpy(this, &job, sizeof(Job));
+      return *this;
     }
 
     void SetToIdle() {
@@ -71,39 +75,20 @@ class ParallelTreeBuilder: public TreeBuilder {
 
   void ParallelBuild(uint32_t thread_id,
                      StoredTree &tree);
-
-  void SetupRoot(StoredTree &tree) override;
-
   void BuildOneNode(Job &job,
                     StoredTree &tree);
-
   void SplitRawNode(Job &job,
                     StoredTree &tree);
-
   void SplitProcessedNode(Job &job,
                           StoredTree &tree);
-
   void AddSplitJobs(ParallelTreeNode *node);
-
   void ParallelSplitOnFeature(Job &job);
-
   void GetJob(Job &job);
-
   void AddJob(const Job &job_to_add);
-
   void AddJobs(const vector<Job> &jobs_to_add,
                uint32_t num_jobs);
-
-  void InsertChildNodes(TreeNode *node,
-                        vector<uint32_t> &sample_ids_left,
-                        vector<uint32_t> &sample_ids_right,
-                        vector<uint32_t> &labels_left,
-                        vector<uint32_t> &labels_right,
-                        vector<uint32_t> &sample_weights_left,
-                        vector<uint32_t> &sample_weights_right) override;
-
+  void InsertChildNodes(TreeNode *node) override;
   bool UpdateStatus(TreeNode *node) override;
-
   void CleanUp(StoredTree &tree) override;
 };
 

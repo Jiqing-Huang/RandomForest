@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
+  <component name="CidrRootsConfiguration">
+    <sourceRoots>
+      <file path="$PROJECT_DIR$" />
+      <file path="$PROJECT_DIR$/Dataset" />
+      <file path="$PROJECT_DIR$/Generics" />
+      <file path="$PROJECT_DIR$/Global" />
+      <file path="$PROJECT_DIR$/Predictor" />
+      <file path="$PROJECT_DIR$/Splitter" />
+      <file path="$PROJECT_DIR$/Test" />
+      <file path="$PROJECT_DIR$/Trainer" />
+      <file path="$PROJECT_DIR$/Tree" />
+      <file path="$PROJECT_DIR$/TreeBuilder" />
+      <file path="$PROJECT_DIR$/Util" />
+      <file path="$PROJECT_DIR$/cmake-build-debug/CMakeFiles" />
+      <file path="$PROJECT_DIR$/cmake-build-release/CMakeFiles" />
+      <file path="$PROJECT_DIR$/cmake-build-relwithdebinfo/CMakeFiles" />
+    </sourceRoots>
+  </component>
 </project>
