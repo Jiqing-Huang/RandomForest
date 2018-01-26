@@ -4,42 +4,87 @@
 
 #include <vector>
 #include <cstdint>
-#include "../Util/Maths.h"
-#include "../Dataset/Dataset.h"
-#include "TreeParams.h"
+#include "../Global/GlobalConsts.h"
+#include "../Dataset/SubDataset.h"
+#include "../Util/Cost.h"
 
 using std::vector;
+using std::accumulate;
 
 class NodeStats {
-
  public:
-  uint32_t num_samples;
-  double weighted_num_samples;
-  uint32_t integral_num_samples;
+  NodeStats():
+    cost(0.0), wnum_samples(), histogram(), num_samples(0), sum(0.0), square_sum(0.0) {}
+
+  double Cost() const {
+    return cost;
+  }
+
+  generic_t WNumSamples() const {
+    return wnum_samples;
+  }
+
+  const generic_vec_t &Histogram() const {
+    return *histogram;
+  }
+
+  uint32_t NumSamples() const {
+    return num_samples;
+  }
+
+  double Sum() const {
+    return sum;
+  }
+
+  double SquareSum() const {
+    return square_sum;
+  }
+
+  uint32_t EffectiveNumSamples(uint32_t cost_function) const {
+    return (cost_function == Variance)? num_samples : Generics::Round<uint32_t>(wnum_samples);
+  }
+
+  void SetStats(const SubDataset *subset,
+                const Dataset *dataset,
+                const uint32_t cost_function) {
+    if (cost_function == GiniImpurity || cost_function == Entropy)
+      SetClassificationStats(subset, dataset);
+    if (cost_function == Variance)
+      SetRegressionStats(subset, dataset);
+  }
+
+ private:
+  // common
   double cost;
-  vector<double> histogram;
-  vector<uint32_t> integral_histogram;
 
-  NodeStats(uint32_t num_classes, uint32_t cost_function):
-          num_samples(0), weighted_num_samples(0.0), integral_num_samples(0), cost(0.0),
-          histogram(num_classes, 0.0), integral_histogram(num_classes, 0) {};
+  // specific to classification
+  generic_t wnum_samples;
+  unique_ptr<generic_vec_t> histogram;
 
-  void GetStats(const TreeParams &param,
-                const Dataset &dataset,
-                const vector<uint32_t> &sample_ids,
-                const Maths &util) {
-    num_samples = util.GetNumSamples(sample_ids, *dataset.sample_weights);
-    util.GetHistogramAndSum(sample_ids, *dataset.sample_weights, *dataset.labels, *dataset.class_weights,
-                            histogram, weighted_num_samples);
-    if (param.cost_function == GiniCost) {
-      cost = util.GetCost(histogram, weighted_num_samples);
-    }
-    if (param.cost_function == EntropyCost) {
-      util.GetIntegralHistogramAndSum(sample_ids, *dataset.sample_weights, *dataset.labels,
-                                      dataset.integral_class_weights, integral_histogram, integral_num_samples);
-      cost = util.GetCost(integral_histogram, integral_num_samples);
-    }
-  };
+  // specific to regression
+  uint32_t num_samples;
+  double sum;
+  double square_sum;
+
+  void SetClassificationStats(const SubDataset *subset,
+                              const Dataset *dataset) {
+    Maths::BuildHistogramVisitor bh_visitor(subset->SampleWeights());
+    histogram = make_unique<generic_vec_t>(boost::apply_visitor(bh_visitor, subset->Labels(), dataset->ClassWeights()));
+    Maths::GenericAccumulateVisitor ga_visitor;
+    wnum_samples = boost::apply_visitor(ga_visitor, *histogram);
+    Cost::CostVisitor c_visitor;
+    cost = boost::apply_visitor(c_visitor, *histogram);
+  }
+
+  void SetRegressionStats(const SubDataset *subset,
+                          const Dataset *dataset) {
+    num_samples = accumulate(subset->SampleWeights().cbegin(), subset->SampleWeights().cend(), 0u);
+    Maths::SumVisitor s_visitor(subset->SampleWeights());
+    sum = boost::apply_visitor(s_visitor, subset->Labels());
+    Maths::SquareSumVisitor ss_visitor(subset->SampleWeights());
+    square_sum = boost::apply_visitor(ss_visitor, subset->Labels());
+    cost = Cost::Cost(sum, square_sum, num_samples);
+  }
 };
 
 #endif
