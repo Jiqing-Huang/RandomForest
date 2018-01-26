@@ -2,140 +2,154 @@
 #ifndef DECISIONTREE_TREEPREDICTOR_H
 #define DECISIONTREE_TREEPREDICTOR_H
 
-#include "../Dataset/StoredTree.h"
+#include "../Tree/StoredTree.h"
 #include "../Dataset/Dataset.h"
 #include "../Global/GlobalConsts.h"
+#include "../Generics/Generics.h"
+
+namespace TreePredictorNonMember {
+inline int32_t NextNode(const StoredTree *tree,
+                        const Dataset *dataset,
+                        int32_t cell_id,
+                        uint32_t sample_id) {
+  uint32_t cell_type = tree->cell_type[cell_id];
+  uint32_t feature_idx = cell_type & GetFeatureIdx;
+  uint32_t feature_type = cell_type & GetFeatureType;
+
+  const StoredTree::Info &info = tree->cell_info[cell_id];
+  int32_t left_id = tree->left[cell_id];
+  int32_t right_id = tree->right[cell_id];
+
+  const generic_vec_t &features = dataset->Features(feature_idx);
+  if (feature_type & IsContinuous)
+    return (Generics::At<float>(features, sample_id) < info.float_point) ? left_id : right_id;
+  if (feature_type & IsOrdinal)
+    return (Generics::At<uint32_t>(features, sample_id) <= info.integer) ? left_id : right_id;
+  if (feature_type & IsOneVsAll)
+    return (Generics::At<uint32_t>(features, sample_id) == info.integer) ? left_id : right_id;
+  if (feature_type & IsLowCardinality)
+    return (1 << (Generics::At<uint32_t>(features, sample_id)) & info.integer) ? left_id : right_id;
+  if (feature_type & IsHighCardinality) {
+    uint32_t feature = Generics::At<uint32_t>(features, sample_id);
+    uint32_t mask_idx = feature >> GetMaskIdx;
+    uint32_t mask_shift = feature & GetMaskShift;
+    return (tree->bitmasks[info.integer][mask_idx] & (1 << mask_shift)) ? left_id : right_id;
+  }
+  return 0;
+}
+} // namespace TreePredictorNonMember
 
 class TreePredictor {
 
  public:
-  TreePredictor():
-          tree(nullptr) {}
+  TreePredictor() :
+          class_tree(nullptr), regress_tree(nullptr) {}
 
-  void BindToTree(const StoredTree &tree) {
-    this->tree = &tree;
+  void BindToTree(const ClassificationStoredTree &tree) {
+    class_tree = &tree;
   }
 
-  void PredictOneByMajority(const Dataset *dataset,
-                            uint32_t sample_id,
-                            uint32_t &prediction) {
-    if (tree->num_cell == 0) {
-      prediction = tree->leaf_decision[0];
-      return;
-    }
+  void BindToTree(const RegressionStoredTree &tree) {
+    regress_tree = &tree;
+  }
+
+  uint32_t PredictOneByMajority(const Dataset *dataset,
+                                uint32_t sample_id) {
+    if (class_tree->num_cell == 0)
+       return class_tree->leaf_decision[0];
     int32_t cell_id = 0;
     do {
-      cell_id = NextNode(dataset, cell_id, sample_id);
+      cell_id = TreePredictorNonMember::NextNode(class_tree, dataset, cell_id, sample_id);
     } while (cell_id > 0);
     int32_t leaf_id = -cell_id;
-    prediction = tree->leaf_decision[leaf_id];
-  };
+    return class_tree->leaf_decision[leaf_id];
+  }
 
-  void PredictOneByProbability(const Dataset *dataset,
-                               uint32_t sample_id,
-                               vector<float> &prediction) {
-    if (tree->num_cell == 0) {
-      for (uint32_t idx = 0; idx < prediction.size(); ++idx)
-        prediction[idx] += tree->leaf_probability[0][idx];
-      return;
-    }
+  double PredictOneByMean(const Dataset *dataset,
+                          uint32_t sample_id) {
+    if (regress_tree->num_cell == 0)
+      return regress_tree->leaf_mean[0];
     int32_t cell_id = 0;
     do {
-      cell_id = NextNode(dataset, cell_id, sample_id);
+      cell_id = TreePredictorNonMember::NextNode(regress_tree, dataset, cell_id, sample_id);
     } while (cell_id > 0);
     int32_t leaf_id = -cell_id;
-    for (uint32_t idx = 0; idx < prediction.size(); ++idx)
-      prediction[idx] += tree->leaf_probability[leaf_id][idx];
-  };
-
-  void PredictBatchByMajority(const Dataset *dataset,
-                              const vector<uint32_t> &sample_ids,
-                              vector<uint32_t> &predictions) {
-    for (const auto &sample_id: sample_ids)
-      PredictOneByMajority(dataset, sample_id, predictions[sample_id]);
-  };
-
-  void PredictBatchByProbability(const Dataset *dataset,
-                                 const vector<uint32_t> &sample_ids,
-                                 vector<vector<float>> &predictions) {
-    for (const auto &sample_id: sample_ids)
-      PredictOneByProbability(dataset, sample_id, predictions[sample_id]);
-  };
-
-  void PredictAllByMajority(const Dataset *dataset,
-                            vector<uint32_t> &predictions) {
-    for (uint32_t idx = 0; idx != dataset->num_samples; ++idx)
-      PredictOneByMajority(dataset, idx, predictions[idx]);
+    return regress_tree->leaf_mean[leaf_id];
   }
 
-  void PredictAllByProbability(const Dataset *dataset,
-                               vector<vector<float>> &predictions) {
-    for (uint32_t idx = 0; idx != dataset->num_samples; ++idx)
-      PredictOneByProbability(dataset, idx, predictions[idx]);
+  vec_flt_t PredictOneByProbability(const Dataset *dataset,
+                                    uint32_t sample_id) {
+    if (class_tree->num_cell == 0)
+      return class_tree->leaf_probability[0];
+    int32_t cell_id = 0;
+    do {
+      cell_id = TreePredictorNonMember::NextNode(class_tree, dataset, cell_id, sample_id);
+    } while (cell_id > 0);
+    int32_t leaf_id = -cell_id;
+    return class_tree->leaf_probability[leaf_id];
   }
 
-  void PredictAbsentByMajority(const Dataset *dataset,
-                               const vector<uint32_t> &sample_weights,
-                               vector<uint32_t> &predictions) {
-    for (uint32_t idx = 0; idx != dataset->num_samples; ++idx)
-      if (!sample_weights[idx])
-        PredictOneByMajority(dataset, idx, predictions[idx]);
+  vec_uint32_t PredictAllByMajority(const Dataset *dataset) {
+    vec_uint32_t predictions(dataset->Meta().size, 0);
+    for (uint32_t idx = 0; idx != dataset->Meta().size; ++idx)
+      predictions[idx] = PredictOneByMajority(dataset, idx);
+    return predictions;
   }
 
-  void PredictAbsentByProbability(const Dataset *dataset,
-                                  const vector<uint32_t> &sample_weights,
-                                  vector<vector<float>> &predictions) {
-    for (uint32_t idx = 0; idx != dataset->num_samples; ++idx)
-      if (!sample_weights[idx])
-        PredictOneByProbability(dataset, idx, predictions[idx]);
+  vec_dbl_t PredictAllByMean(const Dataset *dataset) {
+    vec_dbl_t predictions(dataset->Meta().size, 0.0);
+    for (uint32_t idx = 0; idx != dataset->Meta().size; ++idx)
+      predictions[idx] = PredictOneByMean(dataset, idx);
+    return predictions;
   }
 
-  void PredictPresentByMajority(const Dataset *dataset,
-                                const vector<uint32_t> &sample_weights,
-                                vector<uint32_t> &predictions) {
-    for (uint32_t idx = 0; idx != dataset->num_samples; ++idx)
-      if (sample_weights[idx])
-        PredictOneByMajority(dataset, idx, predictions[idx]);
+  vector<vec_flt_t> PredictAllByProbability(const Dataset *dataset) {
+    vector<vec_flt_t> predictions(dataset->Meta().size, vec_flt_t());
+    for (uint32_t idx = 0; idx != dataset->Meta().size; ++idx)
+      predictions[idx] = PredictOneByProbability(dataset, idx);
+    return predictions;
   }
 
-  void PredictPresentByProbability(const Dataset *dataset,
-                                   const vector<uint32_t> &sample_weights,
-                                   vector<vector<float>> &predictions) {
-    for (uint32_t idx = 0; idx != dataset->num_samples; ++idx)
-      if (sample_weights[idx])
-        PredictOneByProbability(dataset, idx, predictions[idx]);
+  vec_uint32_t PredictSelectedByMajority(const Dataset *dataset,
+                                         const vec_uint32_t &sample_weights,
+                                         const uint32_t selection = PredictAll) {
+    vec_uint32_t predictions(dataset->Meta().size, 0);
+    for (uint32_t idx = 0; idx != dataset->Meta().size; ++idx)
+      if (ToPredict(sample_weights, idx, selection))
+        predictions[idx] = PredictOneByMajority(dataset, idx);
+    return predictions;
+  }
+
+  vec_dbl_t PredictSelectedByMean(const Dataset *dataset,
+                                  const vec_uint32_t &sample_weights,
+                                  const uint32_t selection = PredictAll) {
+    vec_dbl_t predictions(dataset->Meta().size, 0.0);
+    for (uint32_t idx = 0; idx != dataset->Meta().size; ++idx)
+      if (ToPredict(sample_weights, idx, selection))
+        predictions[idx] = PredictOneByMean(dataset, idx);
+    return predictions;
+  }
+
+  vector<vec_flt_t> PredictSelectedByProbability(const Dataset *dataset,
+                                                 const vec_uint32_t &sample_weights,
+                                                 const uint32_t selection = PredictAll) {
+    vector<vec_flt_t> predictions(dataset->Meta().size);
+    for (uint32_t idx = 0; idx != dataset->Meta().size; ++idx)
+      if (ToPredict(sample_weights, idx, selection))
+        predictions[idx] = PredictOneByProbability(dataset, idx);
+    return predictions;
   }
 
  private:
-  const StoredTree *tree;
+  const ClassificationStoredTree *class_tree;
+  const RegressionStoredTree *regress_tree;
 
-  int32_t NextNode(const Dataset *dataset,
-                   int32_t cell_id,
-                   int32_t sample_id) {
-    uint32_t cell_type = tree->cell_type[cell_id];
-    uint32_t feature_idx = cell_type & GetFeatureIdx;
-    uint32_t feature_type = cell_type & GetFeatureType;
-
-    const StoredTree::Info &info = tree->cell_info[cell_id];
-    int32_t left_id = tree->left[cell_id];
-    int32_t right_id = tree->right[cell_id];
-
-    if (feature_type & IsContinuous)
-      return ((*dataset->numerical_features)[feature_idx][sample_id] < info.float_point)? left_id : right_id;
-    if (feature_type & IsOrdinal)
-      return ((*dataset->discrete_features)[feature_idx][sample_id] <= info.integer)? left_id : right_id;
-    if (feature_type & IsOneVsAll)
-      return ((*dataset->discrete_features)[feature_idx][sample_id] == info.integer)? left_id : right_id;
-    if (feature_type & IsLowCardinality)
-      return ((1 << (*dataset->discrete_features)[feature_idx][sample_id]) & info.integer)? left_id : right_id;
-    if (feature_type & IsHighCardinality) {
-      uint32_t feature = (*dataset->discrete_features)[feature_idx][sample_id];
-      uint32_t mask_idx = feature >> GetMaskIdx;
-      uint32_t mask_shift = feature & GetMaskShift;
-      return (tree->bitmasks[info.integer][mask_idx] & (1 << mask_shift))? left_id : right_id;
-    }
-    return 0;
+  bool ToPredict(const vec_uint32_t &sample_weights,
+                 const uint32_t idx,
+                 const uint32_t selection) {
+    return selection == PredictAll ||
+           (sample_weights[idx] > 0 && selection == PredictPresent) ||
+           (sample_weights[idx] == 0 && selection == PredictAbsent);
   }
 };
-
 #endif
