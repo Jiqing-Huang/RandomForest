@@ -19,7 +19,7 @@ class ParallelTreeNode: public TreeNode {
           thread_id_builder(parent->thread_id_builder), thread_id_splitter() {};
 
   void SetParallelBuilding(uint32_t thread_id) {
-    parallel_type = IsParallelSplittingType;
+    parallel_type = IsParallelBuildingType;
     thread_id_builder = thread_id;
   }
 
@@ -29,7 +29,7 @@ class ParallelTreeNode: public TreeNode {
 
   void SetParallelSplitting(uint32_t thread_id,
                             uint32_t feature) {
-    parallel_type = IsParallelBuildingType;
+    parallel_type = IsParallelSplittingType;
     thread_id_splitter[feature] = thread_id;
   }
 

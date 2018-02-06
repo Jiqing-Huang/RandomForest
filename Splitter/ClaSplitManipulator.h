@@ -9,6 +9,10 @@
 #include "../Tree/TreeNode.h"
 #include "../Util/Maths.h"
 #include "../Util/Random.h"
+#include "../Util/Cost.h"
+
+#define IS_INTEGRAL_FEATURE (std::is_integral<feature_t>::value)
+#define IS_INTEGRAL_LABEL (std::is_integral<label_t>::value)
 
 using std::vector;
 using std::copy;
@@ -17,7 +21,7 @@ using std::iota;
 using std::sort;
 
 template <typename class_weight_t>
-class ClassificationStats {
+class ClaStats {
  public:
   vector<class_weight_t> init_left;
   vector<class_weight_t> init_right;
@@ -25,8 +29,8 @@ class ClassificationStats {
   vector<class_weight_t> cur_right;
   vector<class_weight_t> bin_class_matrix;
   vector<class_weight_t> binwise_wnum_samples;
-  vector<uint32_t> bin_ids;
-  vector<double> fractions;
+  vec_uint32_t bin_ids;
+  vec_dbl_t fractions;
   class_weight_t wnum_samples_left;
   class_weight_t wnum_samples_right;
   class_weight_t wnum_samples;
@@ -35,27 +39,108 @@ class ClassificationStats {
   double updater_left;
   double updater_right;
 
-  vector<class_weight_t> class_weights;
   const MetaData &meta;
-  const TreeParams &params;
+  vector<class_weight_t> class_weights;
+  class_weight_t effective_min_leaf_node;
 
-  ClassificationStats(const MetaData &meta,
-                      const generic_vec_t &class_weights,
-                      const TreeParams &params):
-    meta(meta), params(params), init_left(meta.num_classes, 0), init_right(meta.num_classes, 0),
-    cur_left(meta.num_classes, 0), cur_right(meta.num_classes, 0), bin_class_matrix(meta.max_num_bins * meta.num_classes, 0),
+  ClaStats(const MetaData &meta,
+           const vec_dbl_t &class_weights,
+           const TreeParams &params):
+    meta(meta), init_left(meta.num_classes, 0), init_right(meta.num_classes, 0), cur_left(meta.num_classes, 0),
+    cur_right(meta.num_classes, 0), bin_class_matrix(meta.max_num_bins * meta.num_classes, 0),
     binwise_wnum_samples(meta.max_num_bins, 0), bin_ids(meta.max_num_bins, 0), fractions(meta.max_num_bins, 0.0),
-    wnum_samples_left(0), wnum_samples_right(0), wnum_samples(0), num_bins(0), updater_left(0.0), updater_right(0.0) {
-    Maths::CastAndCopyVisitor<class_weight_t> visitor;
-    this->class_weights = boost::apply_visitor(visitor, class_weights);
+    wnum_samples_left(0), wnum_samples_right(0), wnum_samples(0), num_bins(0), updater_left(0.0), updater_right(0.0),
+    class_weights((params.cost_function == GiniImpurity)?
+                  Maths::ScaleAndCast<class_weight_t>(class_weights, 1.0) :
+                  Maths::ScaleAndCast<class_weight_t>(class_weights, Cost::multiplier)),
+    effective_min_leaf_node((params.cost_function == GiniImpurity)?
+                            params.min_leaf_node :
+                            Generics::Round<class_weight_t, double>(params.min_leaf_node * Cost::multiplier)) {}
+};
+
+class GiniCostComputer {
+ public:
+
+  void Init(const NodeStats *node_stats,
+            vec_dbl_t &init_histo,
+            double &init_wnum_samples,
+            double &init_updater) {
+    copy(node_stats->Histogram().begin(), node_stats->Histogram().end(), init_histo.begin());
+    init_wnum_samples = node_stats->WNumSamples();
+    init_updater = init_wnum_samples * node_stats->Cost();
+  }
+
+  void UpdateCost(ClaStats<double> &stats,
+                  double weight,
+                  double wnum_all_left,
+                  double wnum_one_left,
+                  double wnum_all_right,
+                  double wnum_one_right,
+                  double &cost) {
+    stats.updater_left -= 2 * weight * (wnum_all_left - wnum_one_left);
+    stats.updater_right += 2 * weight * (wnum_all_right - wnum_one_right);
+    cost = stats.updater_left / wnum_all_left + stats.updater_right / wnum_all_right;
+  }
+
+  double ComputeCost(ClaStats<double> &stats,
+                     const vec_dbl_t &histo,
+                     double wnum_samples,
+                     uint32_t begin,
+                     uint32_t num_classes) {
+    double cost = 0.0;
+    for (uint32_t idx = begin; idx != begin + num_classes; ++idx)
+      cost += histo[idx] * (wnum_samples - histo[idx]);
+    cost /= wnum_samples;
+    return cost;
   }
 };
 
-template <typename class_weight_t, typename CostComputer>
-class ClassificationSplitManipulator {
+class EntropyCostComputer {
  public:
-  explicit ClassificationSplitManipulator(const Dataset *dataset,
-                                          const TreeParams &params):
+  void Init(const NodeStats *node_stats,
+            vec_uint32_t &init_histo,
+            uint32_t &init_wnum_samples,
+            double &init_updater) {
+    for (uint32_t idx = 0; idx != node_stats->Histogram().size(); ++idx)
+      init_histo[idx] = Generics::Round<uint32_t, double>(Cost::multiplier * node_stats->Histogram()[idx]);
+    init_wnum_samples = Generics::Round<uint32_t, double>(Cost::multiplier * node_stats->WNumSamples());
+    init_updater = node_stats->Cost();
+  }
+
+  void UpdateCost(ClaStats<uint32_t> &stats,
+                  uint32_t weight,
+                  uint32_t wnum_all_left,
+                  uint32_t wnum_one_left,
+                  uint32_t wnum_all_right,
+                  uint32_t wnum_one_right,
+                  double &cost) {
+    stats.updater_left -= Cost::DeltaNLogN(wnum_all_left + weight, wnum_all_left) -
+                          Cost::DeltaNLogN(wnum_one_left + weight, wnum_one_left);
+    stats.updater_right += Cost::DeltaNLogN(wnum_all_right, wnum_all_right - weight) -
+                           Cost::DeltaNLogN(wnum_one_right, wnum_one_right - weight);
+    cost = stats.updater_left + stats.updater_right;
+  }
+
+  double ComputeCost(ClaStats<uint32_t> &stats,
+                     const vector<uint32_t> &histo,
+                     uint32_t wnum_samples,
+                     uint32_t begin,
+                     uint32_t num_classes) {
+    double cost = Cost::NLogN(wnum_samples);
+    for (uint32_t idx = begin; idx != begin + num_classes; ++idx)
+      cost -= Cost::NLogN(histo[idx]);
+    return cost;
+  }
+};
+
+template <typename CostComputer>
+class ClaSplitManipulator {
+
+  using class_weight_t = std::conditional_t<std::is_same<CostComputer, GiniCostComputer>::value, double, uint32_t>;
+
+ public:
+  explicit ClaSplitManipulator(const Dataset *dataset,
+                               const TreeParams &params):
           stats(dataset->Meta(), dataset->ClassWeights(), params), cost_computer() {}
 
   void NumericalInit(const TreeNode *node) {
@@ -67,10 +152,11 @@ class ClassificationSplitManipulator {
   }
 
   template <typename label_t>
-  void MoveOneSample(const vector<label_t> &labels,
-                     const vec_uint32_t &sample_weights,
-                     uint32_t idx,
-                     double &cost) {
+  typename std::enable_if_t<IS_INTEGRAL_LABEL, void>
+  MoveOneSample(const vector<label_t> &labels,
+                const vec_uint32_t &sample_weights,
+                uint32_t idx,
+                double &cost) {
     label_t label = labels[idx];
     class_weight_t weight = sample_weights[idx] * stats.class_weights[label];
     stats.cur_left[label] -= weight;
@@ -82,11 +168,12 @@ class ClassificationSplitManipulator {
   }
 
   template <typename feature_t, typename label_t>
-  void DiscreteInit(const vector<feature_t> &features,
-                    const vector<label_t> &labels,
-                    const vec_uint32_t &sample_weights,
-                    uint32_t feature_idx,
-                    TreeNode *node) {
+  typename std::enable_if_t<IS_INTEGRAL_LABEL && IS_INTEGRAL_FEATURE, void>
+  DiscreteInit(const vector<feature_t> &features,
+               const vector<label_t> &labels,
+               const vec_uint32_t &sample_weights,
+               uint32_t feature_idx,
+               TreeNode *node) {
     const uint32_t num_classes = stats.meta.num_classes;
 
     for (uint32_t idx = 0; idx != node->Size(); ++idx) {
@@ -130,7 +217,11 @@ class ClassificationSplitManipulator {
   void MoveOneBinLToR(uint32_t bin,
                       double &cost) {
     const uint32_t num_classes = stats.meta.num_classes;
-    Maths::VectorMove(num_classes, stats.bin_class_matrix, num_classes * bin, stats.cur_left, stats.cur_right);
+    uint32_t offset = bin * num_classes;
+    std::transform(stats.cur_left.begin(), stats.cur_left.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.cur_left.begin(), std::minus<>());
+    std::transform(stats.cur_right.begin(), stats.cur_right.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.cur_right.begin(), std::plus<>());
     stats.wnum_samples_left -= stats.binwise_wnum_samples[bin];
     stats.wnum_samples_right += stats.binwise_wnum_samples[bin];
 
@@ -141,7 +232,11 @@ class ClassificationSplitManipulator {
   void MoveOneBinRToL(uint32_t bin,
                       double &cost) {
     const uint32_t num_classes = stats.meta.num_classes;
-    Maths::VectorMove(num_classes, stats.bin_class_matrix, num_classes * bin, stats.cur_right, stats.cur_left);
+    uint32_t offset = bin * num_classes;
+    std::transform(stats.cur_left.begin(), stats.cur_left.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.cur_left.begin(), std::plus<>());
+    std::transform(stats.cur_right.begin(), stats.cur_right.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.cur_right.begin(), std::minus<>());
     stats.wnum_samples_left += stats.binwise_wnum_samples[bin];
     stats.wnum_samples_right -= stats.binwise_wnum_samples[bin];
 
@@ -153,7 +248,8 @@ class ClassificationSplitManipulator {
                    double &cost) {
     const uint32_t num_classes = stats.meta.num_classes;
     uint32_t offset = bin * num_classes;
-    Maths::VectorMinusOutOfPlace(num_classes, stats.init_left, stats.bin_class_matrix, offset, stats.cur_left);
+    std::transform(stats.init_left.begin(), stats.init_left.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.cur_left.begin(), std::minus<>());
     stats.wnum_samples_left = stats.wnum_samples - stats.binwise_wnum_samples[bin];
     stats.wnum_samples_right = stats.binwise_wnum_samples[bin];
     cost = cost_computer.ComputeCost(stats, stats.cur_left, stats.wnum_samples_left, 0, num_classes) +
@@ -179,8 +275,10 @@ class ClassificationSplitManipulator {
                             double &cost) {
     const uint32_t num_classes = stats.meta.num_classes;
     uint32_t offset = num_classes * bin;
-    Maths::VectorMinusOutOfPlace(num_classes, stats.init_left, stats.bin_class_matrix, offset, stats.cur_left);
-    Maths::VectorAddOutOfPlace(num_classes, stats.init_right, stats.bin_class_matrix, offset, stats.cur_right);
+    std::transform(stats.init_left.begin(), stats.init_left.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.cur_left.begin(), std::minus<>());
+    std::transform(stats.init_right.begin(), stats.init_right.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.cur_right.begin(), std::plus<>());
     class_weight_t wnum_samples_left_cur = stats.wnum_samples_left - stats.binwise_wnum_samples[bin];
     class_weight_t wnum_samples_right_cur = stats.wnum_samples_right + stats.binwise_wnum_samples[bin];
     cost = cost_computer.ComputeCost(stats, stats.cur_left, wnum_samples_left_cur, 0, num_classes) +
@@ -190,31 +288,36 @@ class ClassificationSplitManipulator {
   void MoveOneBinInPlace(uint32_t bin) {
     const uint32_t num_classes = stats.meta.num_classes;
     uint32_t offset = num_classes * bin;
-    Maths::VectorMove(num_classes, stats.bin_class_matrix, offset, stats.init_left, stats.init_right);
+    std::transform(stats.init_left.begin(), stats.init_left.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.init_left.begin(), std::minus<>());
+    std::transform(stats.init_right.begin(), stats.init_right.end(), stats.bin_class_matrix.begin() + offset,
+                   stats.init_right.begin(), std::plus<>());
     stats.wnum_samples_left -= stats.binwise_wnum_samples[bin];
     stats.wnum_samples_right += stats.binwise_wnum_samples[bin];
   }
 
   bool LessThanMinLeafNode() {
-    return stats.wnum_samples_left < stats.params.min_leaf_node ||
-           stats.wnum_samples_right < stats.params.min_leaf_node;
+    return stats.wnum_samples_left < stats.effective_min_leaf_node ||
+           stats.wnum_samples_right < stats.effective_min_leaf_node;
   }
 
   template <typename feature_t>
-  bool Splittable(const vector<feature_t> &features,
-                  const vec_uint32_t &sample_ids,
-                  const vec_uint32_t &sorted_idx,
-                  uint32_t idx) {
+  typename std::enable_if_t<!IS_INTEGRAL_FEATURE, bool>
+  Splittable(const vector<feature_t> &features,
+             const vec_uint32_t &sample_ids,
+             const vec_uint32_t &sorted_idx,
+             uint32_t idx) {
     uint32_t first = sample_ids[sorted_idx[idx]];
     uint32_t second = sample_ids[sorted_idx[idx + 1]];
     return features[first] != features[second];
   }
 
   template <typename feature_t>
-  float NumericalThreshold(const vector<feature_t> &features,
-                           const vec_uint32_t &sample_ids,
-                           const vec_uint32_t &sorted_idx,
-                           uint32_t idx) {
+  typename std::enable_if_t<!IS_INTEGRAL_FEATURE, float>
+  NumericalThreshold(const vector<feature_t> &features,
+                     const vec_uint32_t &sample_ids,
+                     const vec_uint32_t &sorted_idx,
+                     uint32_t idx) {
     uint32_t first = sample_ids[sorted_idx[idx]];
     uint32_t second = sample_ids[sorted_idx[idx + 1]];
     return (features[first] + features[second]) / 2.0f;
@@ -245,89 +348,11 @@ class ClassificationSplitManipulator {
   }
 
  private:
-  ClassificationStats<class_weight_t> stats;
+  ClaStats<class_weight_t> stats;
   CostComputer cost_computer;
 };
 
-class GiniCostComputer {
- public:
-
-  void Init(const NodeStats *node_stats,
-            vector<double> &init_histo,
-            double &init_wnum_samples,
-            double &init_updater) {
-    Maths::CastAndCopyVisitor<double> visitor;
-    vector<double> temp_init_histo = boost::apply_visitor(visitor, node_stats->Histogram());
-    copy(temp_init_histo.begin(), temp_init_histo.end(), init_histo.begin());
-    init_wnum_samples = Generics::Round<double>(node_stats->WNumSamples());
-    init_updater = init_wnum_samples * node_stats->Cost();
-  }
-
-  void UpdateCost(ClassificationStats<double> &stats,
-                  double weight,
-                  double wnum_all_left,
-                  double wnum_one_left,
-                  double wnum_all_right,
-                  double wnum_one_right,
-                  double &cost) {
-    stats.updater_left -= 2 * weight * (wnum_all_left - wnum_one_left);
-    stats.updater_right += 2 * weight * (wnum_all_right - wnum_one_right);
-    cost = stats.updater_left / wnum_all_left + stats.updater_right / wnum_all_right;
-  }
-
-  double ComputeCost(ClassificationStats<double> &stats,
-                     const vector<double> &histo,
-                     double wnum_samples,
-                     uint32_t begin,
-                     uint32_t num_classes) {
-    double cost = 0.0;
-    for (uint32_t idx = begin; idx != begin + num_classes; ++idx)
-      cost += histo[idx] * (wnum_samples - histo[idx]);
-    cost /= wnum_samples;
-    return cost;
-  }
-};
-
-class EntropyCostComputer {
- public:
-  void Init(const NodeStats *node_stats,
-            vector<uint32_t> &init_histo,
-            uint32_t &init_wnum_samples,
-            double &init_updater) {
-    Maths::CastAndCopyVisitor<uint32_t> visitor;
-    vector<uint32_t> temp_init_histo = boost::apply_visitor(visitor, node_stats->Histogram());
-    copy(temp_init_histo.begin(), temp_init_histo.end(), init_histo.begin());
-    init_wnum_samples = Generics::Round<uint32_t>(node_stats->WNumSamples());
-    init_updater = node_stats->Cost();
-  }
-
-  void UpdateCost(ClassificationStats<uint32_t> &stats,
-                  uint32_t weight,
-                  uint32_t wnum_all_left,
-                  uint32_t wnum_one_left,
-                  uint32_t wnum_all_right,
-                  uint32_t wnum_one_right,
-                  double &cost) {
-    stats.updater_left -= Cost::DeltaNLogN(wnum_all_left + weight, wnum_all_left) -
-                          Cost::DeltaNLogN(wnum_one_left + weight, wnum_one_left);
-    stats.updater_right += Cost::DeltaNLogN(wnum_all_right, wnum_all_right - weight) -
-                           Cost::DeltaNLogN(wnum_one_right, wnum_one_right - weight);
-    cost = stats.updater_left + stats.updater_right;
-  }
-
-  double ComputeCost(ClassificationStats<uint32_t> &stats,
-                     const vector<uint32_t> &histo,
-                     uint32_t wnum_samples,
-                     uint32_t begin,
-                     uint32_t num_classes) {
-    double cost = Cost::NLogN(wnum_samples);
-    for (uint32_t idx = begin; idx != begin + num_classes; ++idx)
-      cost -= Cost::NLogN(histo[idx]);
-    return cost;
-  }
-};
-
-using GiniSplitManipulator = ClassificationSplitManipulator<double, GiniCostComputer>;
-using EntropySplitManipulator = ClassificationSplitManipulator<uint32_t, EntropyCostComputer>;
+using GiniSplitManipulator = ClaSplitManipulator<GiniCostComputer>;
+using EntropySplitManipulator = ClaSplitManipulator<EntropyCostComputer>;
 
 #endif

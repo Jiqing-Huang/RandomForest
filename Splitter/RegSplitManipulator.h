@@ -9,9 +9,12 @@
 #include "../Util/Maths.h"
 #include "../Tree/TreeNode.h"
 
+#define IS_INTEGRAL_FEATURE (std::is_integral<feature_t>::value)
+#define IS_INTEGRAL_LABEL (std::is_integral<label_t>::value)
+
 using std::vector;
 
-class RegressionStats {
+class RegStats {
  public:
   double sum;
   double sum_left;
@@ -30,19 +33,19 @@ class RegressionStats {
   const MetaData &meta;
   const TreeParams &params;
 
-  RegressionStats(const MetaData &meta,
-                  const TreeParams &params):
+  RegStats(const MetaData &meta,
+           const TreeParams &params):
     meta(meta), params(params), sum(0.0), sum_left(0.0), sum_right(0.0), square_sum(0.0),
     binwise_sum(meta.max_num_bins, 0.0), binwise_num_samples(meta.max_num_bins, 0.0), bin_ids(meta.max_num_bins, 0),
     means(meta.max_num_bins, 0.0), num_samples_left(0.0), num_samples_right(0.0), num_samples(0.0), num_bins(0) {}
 };
 
 template <typename CostComputer>
-class RegressionSplitManipulator {
+class RegSplitManipulator {
  public:
-  RegressionSplitManipulator(const Dataset *dataset,
-                             const TreeParams &params):
-          stats(dataset->Meta(), params), cost_computer() {};
+  RegSplitManipulator(const Dataset *dataset,
+                      const TreeParams &params):
+    stats(dataset->Meta(), params), cost_computer() {};
 
   void NumericalInit(const TreeNode *node) {
     stats.square_sum = node->Stats()->SquareSum();
@@ -55,10 +58,11 @@ class RegressionSplitManipulator {
   }
 
   template <typename label_t>
-  void MoveOneSample(const vector<label_t> &labels,
-                     const vec_uint32_t &sample_weights,
-                     uint32_t idx,
-                     double &cost) {
+  typename std::enable_if<!IS_INTEGRAL_LABEL, void>::type
+  MoveOneSample(const vector<label_t> &labels,
+                const vec_uint32_t &sample_weights,
+                uint32_t idx,
+                double &cost) {
     label_t label = labels[idx];
     uint32_t sample_weight = sample_weights[idx];
     stats.num_samples_left -= sample_weight;
@@ -71,11 +75,12 @@ class RegressionSplitManipulator {
   }
 
   template <typename feature_t, typename label_t>
-  void DiscreteInit(const vector<feature_t> &features,
-                    const vector<label_t> &labels,
-                    const vec_uint32_t &sample_weights,
-                    uint32_t feature_idx,
-                    TreeNode *node) {
+  typename std::enable_if<!IS_INTEGRAL_LABEL && IS_INTEGRAL_FEATURE, void>::type
+  DiscreteInit(const vector<feature_t> &features,
+               const vector<label_t> &labels,
+               const vec_uint32_t &sample_weights,
+               uint32_t feature_idx,
+               TreeNode *node) {
     for (uint32_t idx = 0; idx != node->Size(); ++idx) {
       feature_t bin = features[idx];
       label_t label = labels[idx];
@@ -167,20 +172,22 @@ class RegressionSplitManipulator {
   }
 
   template <typename feature_t>
-  bool Splittable(const vector<feature_t> &features,
-                  const vector<uint32_t> &sample_ids,
-                  const vector<uint32_t> &sorted_idx,
-                  uint32_t idx) {
+  typename std::enable_if<!IS_INTEGRAL_FEATURE, bool>::type
+  Splittable(const vector<feature_t> &features,
+             const vec_uint32_t &sample_ids,
+             const vec_uint32_t &sorted_idx,
+             uint32_t idx) {
     uint32_t first = sample_ids[sorted_idx[idx]];
     uint32_t second = sample_ids[sorted_idx[idx + 1]];
     return features[first] != features[second];
   }
 
   template <typename feature_t>
-  float NumericalThreshold(const vector<feature_t> &features,
-                           const vector<uint32_t> &sample_ids,
-                           const vector<uint32_t> &sorted_idx,
-                           uint32_t idx) {
+  typename std::enable_if<!IS_INTEGRAL_FEATURE, float>::type
+  NumericalThreshold(const vector<feature_t> &features,
+                     const vec_uint32_t &sample_ids,
+                     const vec_uint32_t &sorted_idx,
+                     uint32_t idx) {
     uint32_t first = sample_ids[sorted_idx[idx]];
     uint32_t second = sample_ids[sorted_idx[idx + 1]];
     return (features[first] + features[second]) / 2.0f;
@@ -211,7 +218,7 @@ class RegressionSplitManipulator {
   }
 
  private:
-  RegressionStats stats;
+  RegStats stats;
   CostComputer cost_computer;
 };
 
@@ -226,6 +233,6 @@ class VarianceCostComputer {
   }
 };
 
-using VarianceSplitManipulator = RegressionSplitManipulator<VarianceCostComputer>;
+using VarianceSplitManipulator = RegSplitManipulator<VarianceCostComputer>;
 
 #endif

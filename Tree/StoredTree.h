@@ -6,9 +6,7 @@
 #include <cstdint>
 #include <atomic>
 #include "ParallelTreeNode.h"
-
-using std::vector;
-using std::copy;
+#include "../Util/Maths.h"
 
 class StoredTree {
  public:
@@ -24,15 +22,15 @@ class StoredTree {
   uint32_t max_depth;
   std::atomic<uint32_t> num_bitmask;
 
-  vector<uint32_t> cell_type;
+  vec_uint32_t cell_type;
   vector<Info> cell_info;
-  vector<int32_t> left;
-  vector<int32_t> right;
+  vec_int32_t left;
+  vec_int32_t right;
 
-  vector<vector<uint32_t>> bitmasks;
+  vector<vec_uint32_t> bitmasks;
 
-  vector<vector<double>> feature_importance_by_thread;
-  vector<double> feature_importance;
+  vector<vec_dbl_t> feature_importance_by_thread;
+  vec_dbl_t feature_importance;
   double total_gain;
   double init_loss;
   double final_loss;
@@ -89,7 +87,8 @@ class StoredTree {
   void NormalizeFeatureImportance() {
     uint32_t size = static_cast<uint32_t>(feature_importance.size());
     for (const auto &feature_importance_each: feature_importance_by_thread)
-      Maths::VectorAddInPlace(size, feature_importance_each, 0, feature_importance);
+      std::transform(feature_importance.begin(), feature_importance.end(), feature_importance_each.begin(),
+                     feature_importance.begin(), std::plus<>());
     total_gain = accumulate(feature_importance.begin(), feature_importance.end(), 0.0);
     if (total_gain > 0)
       for (auto &importance: feature_importance)
@@ -99,34 +98,29 @@ class StoredTree {
 
 class ClassificationStoredTree: public StoredTree {
  public:
-  vector<uint32_t> leaf_decision;
-  vector<vector<float>> leaf_probability;
+  vector<vec_dbl_t> leaf_probability;
 
   ClassificationStoredTree():
-          StoredTree::StoredTree(), leaf_decision(), leaf_probability() {}
+          StoredTree::StoredTree(), leaf_probability() {}
 
   void Init(const Dataset &dataset,
             const TreeParams &params,
             uint32_t num_threads) override {
     StoredTree::Init(dataset, params, num_threads);
-    leaf_decision.resize(params.max_num_leaf);
     leaf_probability.resize(params.max_num_leaf);
   }
 
   void CleanUp() override {
     StoredTree::CleanUp();
-    leaf_decision.resize(num_leaf);
     leaf_probability.resize(num_leaf);
-    leaf_decision.shrink_to_fit();
     leaf_probability.shrink_to_fit();
   }
 
   void WriteToLeaf(const TreeNode *node,
                    uint32_t leaf_id) override {
     Maths::CastAndCopyVisitor<float> visitor;
-    leaf_probability[leaf_id] = boost::apply_visitor(visitor, node->Stats()->Histogram());
+    leaf_probability[leaf_id] = node->Stats()->Histogram();
     Maths::Normalize(leaf_probability[leaf_id]);
-    leaf_decision[leaf_id] = Maths::Argmax(leaf_probability[leaf_id]);
     final_loss += node->Stats()->Cost();
   }
 };

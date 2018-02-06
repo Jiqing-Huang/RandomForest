@@ -10,12 +10,8 @@
 #include "../Splitter/SplitInfo.h"
 #include "TreeParams.h"
 #include "NodeStats.h"
-#include "../Dataset/SubDataset.h"
-
-using std::vector;
-using std::move;
-using std::unique_ptr;
-using std::make_unique;
+#include "../Dataset/Dataset.h"
+#include "../Dataset/Subdataset.h"
 
 class TreeNode {
  public:
@@ -27,7 +23,7 @@ class TreeNode {
   explicit TreeNode(const Dataset *dataset):
           node_id(0), type(IsRootType), depth(1), cell_id(0),
           parent(nullptr), left(nullptr), right(nullptr), left_child_processed(false), right_child_processed(false),
-          subset(make_unique<SubDataset>(dataset)), split_info(nullptr), stats(nullptr) {}
+          subset(std::make_unique<Subdataset>(dataset)), split_info(nullptr), stats(nullptr) {}
 
   TreeNode(uint32_t node_id,
            uint32_t type,
@@ -40,12 +36,12 @@ class TreeNode {
 
   void SetStats(const Dataset *dataset,
                 const uint32_t cost_function) {
-    stats = make_unique<NodeStats>();
+    stats = std::make_unique<NodeStats>();
     stats->SetStats(subset.get(), dataset, cost_function);
   }
 
   void InitSplitInfo() {
-    split_info = make_unique<SplitInfo>();
+    split_info = std::make_unique<SplitInfo>();
   }
 
   void DiscardTemporaryElements() {
@@ -128,7 +124,7 @@ class TreeNode {
     right_child_processed = true;
   }
 
-  SubDataset *Subset() {
+  Subdataset *Subset() {
     return subset.get();
   }
 
@@ -156,8 +152,8 @@ class TreeNode {
   TreeNode *right;
   bool left_child_processed;
   bool right_child_processed;
-  unique_ptr<SubDataset> subset;
-  unique_ptr<SplitInfo> split_info;
-  unique_ptr<NodeStats> stats;
+  std::unique_ptr<Subdataset> subset;
+  std::unique_ptr<SplitInfo> split_info;
+  std::unique_ptr<NodeStats> stats;
 };
 #endif

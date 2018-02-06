@@ -1,24 +1,20 @@
 
 #include "ParallelTreeBuilder.h"
+#include "../Tree/StoredTree.h"
 
 #include <thread>
 
-using std::thread;
-using std::ref;
-using std::copy;
-using std::make_unique;
-
 void ParallelTreeBuilder::Build(StoredTree &tree) {
   Init(num_threads, tree);
-  nodes[node_top++] = make_unique<ParallelTreeNode>(dataset);
+  nodes[node_top++] = std::make_unique<ParallelTreeNode>(dataset);
 
   jobs.resize(params.max_num_node * (params.num_features_for_split + 2));
   jobs[job_end++] = Job(ToSplitRawNode, 0);
-  vector<thread> thread_pool;
+  vector<std::thread> thread_pool;
   thread_pool.reserve(num_threads);
   for (uint32_t thread_id = 0; thread_id != num_threads; ++thread_id)
-    thread_pool.emplace_back(thread(&ParallelTreeBuilder::ParallelBuild, this, thread_id, ref(tree)));
-  unique_lock<mutex> lock(main_thread);
+    thread_pool.emplace_back(std::thread(&ParallelTreeBuilder::ParallelBuild, this, thread_id, std::ref(tree)));
+  std::unique_lock<std::mutex> lock(main_thread);
   while (!finish)
     cv_finish.wait(lock);
   for (auto &thread: thread_pool)
@@ -58,7 +54,7 @@ void ParallelTreeBuilder::ParallelBuild(uint32_t thread_id,
 
 void ParallelTreeBuilder::SplitRawNode(Job &job,
                                        StoredTree &tree) {
-  if (nodes[job.node_id]->Size() <= MaxNumSampleForSerialBuild) {
+  if (nodes[job.node_id]->Size() <= MaxSizeForSerialBuild) {
     BuildAllNodes(job.node_id, tree);
     job.SetToIdle();
   } else {
@@ -74,12 +70,9 @@ void ParallelTreeBuilder::BuildOneNode(Job &job,
     tree.max_depth = node->Depth();
 
   node->SetStats(dataset, params.cost_function);
-  bool splittable = node->Stats()->Cost() > FloatError &&
-                    node->Stats()->EffectiveNumSamples(params.cost_function) >= params.effective_min_split_node &&
-                    node->Depth() < params.max_depth;
-
+  bool splittable = Splittable(node);
   if (splittable) {
-    if (node->Size() > MaxNumSampleForSerialSplit) {
+    if (node->Size() > MaxSizeForSerialSplit) {
       AddSplitJobs(node);
       job.SetToIdle();
       return;
@@ -113,7 +106,7 @@ void ParallelTreeBuilder::SplitProcessedNode(Job &job,
 void ParallelTreeBuilder::AddSplitJobs(ParallelTreeNode *node) {
   node->InitParallelSplitting(dataset->Meta().num_features);
   node->InitSplitInfo();
-  const vector<uint32_t> &feature_set = ShuffleFeatures(node);
+  const vec_uint32_t &feature_set = ShuffleFeatures(node);
   vector<Job> jobs_to_add;
   jobs_to_add.reserve(params.num_features_for_split);
   for (uint32_t idx = 0; idx != params.num_features_for_split; ++idx)
@@ -140,10 +133,10 @@ void ParallelTreeBuilder::InsertChildNodes(TreeNode *node) {
   uint32_t right_child_id = node_top++;
   auto *parallel_node = dynamic_cast<ParallelTreeNode*>(node);
   assert(parallel_node);
-  nodes[left_child_id] = make_unique<ParallelTreeNode>(left_child_id, IsLeftChildType | IsParallelBuildingType,
-                                                       parallel_node);
-  nodes[right_child_id] = make_unique<ParallelTreeNode>(right_child_id, IsRightChildType | IsParallelBuildingType,
-                                                        parallel_node);
+  nodes[left_child_id] =
+    std::make_unique<ParallelTreeNode>(left_child_id, IsLeftChildType | IsParallelBuildingType, parallel_node);
+  nodes[right_child_id] =
+    std::make_unique<ParallelTreeNode>(right_child_id, IsRightChildType | IsParallelBuildingType, parallel_node);
   auto *left = dynamic_cast<ParallelTreeNode*>(nodes[left_child_id].get());
   auto *right = dynamic_cast<ParallelTreeNode*>(nodes[right_child_id].get());
   node->LinkChildren(left, right);

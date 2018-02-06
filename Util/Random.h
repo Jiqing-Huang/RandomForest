@@ -4,12 +4,9 @@
 
 #include <random>
 #include <vector>
-#include "../Generics/Generics.h"
+#include "../Generics/TypeDefs.h"
 
 namespace Random {
-
-using std::uniform_int_distribution;
-using std::vector;
 
 extern std::mt19937 random_generator;
 
@@ -22,7 +19,7 @@ static void PartialShuffle(uint32_t n,
                            uint32_t k,
                            vec_uint32_t &target) {
   if (n == k) return;
-  uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
+  std::uniform_int_distribution<uint32_t> distribution(0, UINT32_MAX);
   for (uint32_t idx = 0; idx != k; ++idx) {
     uint32_t next_random = (distribution(random_generator) % n) + idx;
     uint32_t temp = target[idx];

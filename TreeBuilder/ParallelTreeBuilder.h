@@ -6,13 +6,8 @@
 #include <cstring>
 #include <mutex>
 #include <condition_variable>
-
 #include "TreeBuilder.h"
 #include "../Tree/ParallelTreeNode.h"
-
-using std::mutex;
-using std::unique_lock;
-using std::condition_variable;
 
 class ParallelTreeBuilder: public TreeBuilder {
 
@@ -31,47 +26,20 @@ class ParallelTreeBuilder: public TreeBuilder {
   void Build(StoredTree &tree) override;
 
  protected:
-
-  struct Job {
-    uint32_t type;
-    uint32_t node_id;
-
-    Job() {
-      memset(this, 0, sizeof(Job));
-    }
-
-    Job(uint32_t type,
-        uint32_t node_id):
-            type(type), node_id(node_id) {}
-
-    Job(const Job &job) {
-      memcpy(this, &job, sizeof(Job));
-    }
-
-    Job &operator=(const Job &job) {
-      memcpy(this, &job, sizeof(Job));
-      return *this;
-    }
-
-    void SetToIdle() {
-      type = Idle;
-      node_id = 0;
-    }
-  };
-
   uint32_t num_threads;
 
-  vector<Job> jobs;
+  struct Job;
+  std::vector<Job> jobs;
   std::atomic<uint32_t> job_begin;
   std::atomic<uint32_t> job_end;
 
-  mutex main_thread;
-  mutex get_job;
-  mutex add_processed_node;
-  mutex update_status;
+  std::mutex main_thread;
+  std::mutex get_job;
+  std::mutex add_processed_node;
+  std::mutex update_status;
 
-  condition_variable cv_get_job;
-  condition_variable cv_finish;
+  std::condition_variable cv_get_job;
+  std::condition_variable cv_finish;
 
   void ParallelBuild(uint32_t thread_id,
                      StoredTree &tree);
@@ -90,6 +58,33 @@ class ParallelTreeBuilder: public TreeBuilder {
   void InsertChildNodes(TreeNode *node) override;
   bool UpdateStatus(TreeNode *node) override;
   void CleanUp(StoredTree &tree) override;
+};
+
+struct ParallelTreeBuilder::Job {
+  uint32_t type;
+  uint32_t node_id;
+
+  Job() {
+    memset(this, 0, sizeof(Job));
+  }
+
+  Job(uint32_t type,
+      uint32_t node_id):
+    type(type), node_id(node_id) {}
+
+  Job(const Job &job) {
+    memcpy(this, &job, sizeof(Job));
+  }
+
+  Job &operator=(const Job &job) {
+    memcpy(this, &job, sizeof(Job));
+    return *this;
+  }
+
+  void SetToIdle() {
+    type = Idle;
+    node_id = 0;
+  }
 };
 
 #endif
