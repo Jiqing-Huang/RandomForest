@@ -10,16 +10,18 @@
 static const double FloatError = 1e-10;
 
 /// Performance tuning paramters
-/// Preference of subsetting a numerical feature over sorting
+/// Preference of subsetting numerical feature over sorting
 static const float SubsetToSortRatio = 4.0;
-/// Preference of saving memory over speeding
+
+/// Preference of memory saving at the expense of speed
 static const float MemorySavingFactor = 3.0;
-/// Threshold of switching from parallel tree building to serial tree building
-static const uint32_t MaxSizeForSerialBuild = 10000;
+
 /// Threshold of switching from parallel split finding to serial split finding
 static const uint32_t MaxSizeForSerialSplit = 50000;
+
 /// Threshold of switching from brute force to heuristic to find split in many-vs-many discrete feature
 static const uint32_t MaxNumBinsForBruteSplitter = 8;
+
 /// Max number of bins to test in each step in the move-one-bin-at-a-time heuristic split finding algorithm
 static const uint32_t MaxNumBinsForSampling = 16;
 
@@ -44,11 +46,8 @@ static const uint32_t NumBitsPerWord = 32;
 static const uint32_t IsRootType = 0x80000000;
 static const uint32_t IsLeftChildType = 0x40000000;
 static const uint32_t IsRightChildType = 0x20000000;
-static const uint32_t IsParallelBuildingType = 0x10000000;
-static const uint32_t IsParallelSplittingType = 0x08000000;
 
 /// Cost Function ID
-static const uint32_t UndefinedCost = 0;
 static const uint32_t Entropy = 1;
 static const uint32_t GiniImpurity = 2;
 static const uint32_t Variance = 3;
@@ -57,16 +56,5 @@ static const uint32_t Variance = 3;
 static const uint32_t PredictAll = 0;
 static const uint32_t PredictPresent = 1;
 static const uint32_t PredictAbsent = 2;
-
-/// Predict Types
-static const uint32_t PredictMajority = 0;
-static const uint32_t PredictProbability = 1;
-static const uint32_t PredictMean = 2;
-
-/// Job type used in parallel building
-static const uint32_t AllFinished = UINT32_MAX;
-static const uint32_t Idle = UINT32_MAX - 1;
-static const uint32_t ToSplitRawNode = UINT32_MAX - 2;
-static const uint32_t ToSplitProcessedNode = UINT32_MAX - 3;
 
 #endif

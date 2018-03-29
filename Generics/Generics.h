@@ -13,12 +13,6 @@
 using generic_vec_t = boost::variant<vec_uint8_t, vec_uint16_t, vec_uint32_t, vec_flt_t, vec_dbl_t>;
 using generic_t = boost::variant<uint8_t, uint16_t, uint32_t, float, double>;
 
-using integral_vec_t = boost::variant<vec_uint8_t, vec_uint16_t, vec_uint32_t>;
-using integral_t = boost::variant<uint8_t, uint16_t, uint32_t>;
-
-using floatpoint_vec_t = boost::variant<vec_flt_t, vec_dbl_t>;
-using floatpoint_t = boost::variant<float, double>;
-
 namespace Generics {
 
 /// type ids that match exactly the underlying types in boost::variant when which() is called
@@ -98,7 +92,7 @@ Round(const generic_t &value) {
   }
 }
 
-/// get an elemnt in a generic vector by index, and cast it to data_t
+/// fetch an elemnt in a generic vector by index, and cast it to data_t
 /// by rounding to the nearest value representable as data_t
 /// casting to integral type and to float point type are handled differently
 

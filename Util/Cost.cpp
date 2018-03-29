@@ -46,10 +46,11 @@ void ConstructNLogNTable(const vec_dbl_t &class_weights,
 }
 
 void ExtendNLogNTable(const double wnum_samples) {
+  uint32_t old_upper_bound = static_cast<uint32_t>(nlogn_table.size());
   uint32_t upper_bound = static_cast<uint32_t>(0.5 + wnum_samples * multiplier) + 1;
-  if (upper_bound <= nlogn_table.size()) return;
+  if (upper_bound <= old_upper_bound) return;
   nlogn_table.reserve(upper_bound);
-  for (uint32_t idx = nlogn_table.size(); idx != upper_bound; ++idx) {
+  for (uint32_t idx = old_upper_bound; idx != upper_bound; ++idx) {
     const double x = static_cast<double>(idx) / multiplier;
     nlogn_table.push_back(x * log2(x));
   }

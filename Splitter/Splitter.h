@@ -13,23 +13,22 @@ class TreeNode;
 
 class Splitter {
  public:
-  /// Construct the right SplitterImplementor based on the cost function
-  explicit Splitter(uint32_t cost_function);
+  static Splitter &GetInstance(const Dataset *dataset,
+                               const TreeParams &params);
   ~Splitter();
   Splitter(const Splitter &splitter) = delete;
   Splitter(Splitter &&splitter) = delete;
   Splitter &operator=(const Splitter &splitter) = delete;
   Splitter &operator=(Splitter &&splitter) = delete;
-  void Init(uint32_t num_threads,
-            const Dataset *dataset,
-            const TreeParams &params);
-  void CleanUp();
   void Split(uint32_t feature_idx,
              uint32_t feature_type,
              const Dataset *dataset,
              TreeNode *node);
  private:
   std::unique_ptr<BaseSplitterImpl> spliiter;
+
+  Splitter(const Dataset *datatset,
+           const TreeParams &params);
 };
 
 #endif

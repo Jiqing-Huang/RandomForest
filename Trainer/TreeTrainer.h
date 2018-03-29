@@ -2,10 +2,9 @@
 #ifndef DECISIONTREE_TREETRAINER_H
 #define DECISIONTREE_TREETRAINER_H
 
-#include "../TreeBuilder/TreeBuilder.h"
-#include "../TreeBuilder/ParallelTreeBuilder.h"
 #include "../Predictor/TreePredictor.h"
 #include "../Tree/StoredTree.h"
+#include "../TreeBuilder/SingleTreeBuildDriver.h"
 #include <iostream>
 
 class TreeTrainer {
@@ -17,6 +16,7 @@ class TreeTrainer {
               uint32_t min_leaf_node,
               uint32_t min_split_node,
               uint32_t max_depth,
+              uint32_t max_num_nodes,
               uint32_t random_state,
               uint32_t num_threads);
   void LoadData(Dataset *dataset);
@@ -29,7 +29,7 @@ class TreeTrainer {
   void ClearTree();
 
  private:
-  std::unique_ptr<TreeBuilder> tree_builder;
+  std::unique_ptr<SingleTreeBuildDriver> driver;
   std::unique_ptr<TreePredictor> tree_predictor;
   std::unique_ptr<StoredTree> tree;
   Dataset *dataset;

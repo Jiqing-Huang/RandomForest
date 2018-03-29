@@ -10,10 +10,6 @@
   (std::is_integral<label_t>::value ^ std::is_same<SplitManipulatorType, VarianceSplitManipulator>::value)
 #define IS_INTEGRAL_FEATURE (std::is_integral<feature_t>::value)
 
-using std::vector;
-using std::conditional;
-using std::is_same;
-
 class Dataset;
 class TreeParams;
 class TreeNode;
@@ -22,10 +18,6 @@ class BaseSplitterImpl {
  public:
   BaseSplitterImpl() = default;
   virtual ~BaseSplitterImpl() = default;
-  virtual void Init(const uint32_t num_threads,
-                    const Dataset *dataset,
-                    const TreeParams &params) = 0;
-  virtual void CleanUp() = 0;
   virtual void Split(const uint32_t feature_idx,
                      const uint32_t feature_type,
                      const Dataset *dataset,
@@ -35,18 +27,16 @@ class BaseSplitterImpl {
 template <typename SplitManipulatorType>
 class SplitterImpl: public BaseSplitterImpl {
  public:
-  SplitterImpl();
-  void Init(const uint32_t num_threads,
-            const Dataset *dataset,
-            const TreeParams &params) override;
-  void CleanUp() override;
+  SplitterImpl(const Dataset *dataset,
+               const TreeParams &params);
   void Split(const uint32_t feature_idx,
              const uint32_t feature_type,
              const Dataset *dataset,
              TreeNode *node) override;
 
  private:
-  vector<SplitManipulatorType> split_manipulators;
+  static thread_local std::unique_ptr<SplitManipulatorType> split_manipulator;
+  const TreeParams &params;
   uint32_t cost_function;
   uint32_t num_classes;
 
@@ -86,27 +76,20 @@ class SplitterImpl: public BaseSplitterImpl {
                     const vector<label_t> &labels,
                     const vec_uint32_t &sample_weights,
                     const uint32_t feature_idx,
-                    const uint32_t thread_id,
                     TreeNode *node);
   void OrdinalSplitter(const uint32_t feature_idx,
-                       const uint32_t thread_id,
                        TreeNode *node);
   void OneVsAllSplitter(const uint32_t feature_idx,
-                        const uint32_t thread_id,
                         TreeNode *node);
   void LinearSplitter(const uint32_t feature_idx,
-                      const uint32_t thread_id,
                       TreeNode *node);
   void BruteSplitter(const uint32_t feature_idx,
-                     const uint32_t thread_id,
                      TreeNode *node);
   void GreedySplitter(const uint32_t feature_idx,
-                      const uint32_t thread_id,
                       TreeNode *node);
   void UpdateManyVsManySplit(const vec_uint32_t &indicators,
                              const uint32_t feature_idx,
                              const double gain,
-                             const uint32_t thread_id,
                              TreeNode *node);
 };
 

@@ -27,7 +27,7 @@ class TreePredictor {
   /// Bind to Regression Tree
   void BindToTree(const RegressionStoredTree &tree);
 
-  /// Predict one sample in a dataset by mean label value of samples in the leaf in regression task
+  /// Predict one sample in a dataset by mean label value in regression task
   double PredictOneByMean(const Dataset *dataset,
                           uint32_t sample_id);
 
@@ -35,33 +35,27 @@ class TreePredictor {
   vec_dbl_t PredictOneByProbability(const Dataset *dataset,
                                     uint32_t sample_id);
 
-  /// Predict a subset of samples in a dataset by mean label value in regression task
-  /// selection == PredictAll: predict all samples
-  /// selection == PredictPresent: predict samples whose weight are nonzero
-  /// selection == PredictAbsent: predict samples whose weight are zero
+  /// Predict samples in a dataset by mean value in regression task
+  /// filter == PredictAll: predict all samples
+  /// filter == PredictPresent: predict samples whose weight are nonzero
+  /// filter == PredictAbsent: predict samples whose weight are zero
   virtual vec_dbl_t PredictBatchByMean(const Dataset *dataset,
                                        const uint32_t filter = PredictAll);
 
-  /// Predict a subset of samples in a dataset by probability in classification task
-  /// selection == PredictAll: predict all samples
-  /// selection == PredictPresent: predict samples whose weight are nonzero
-  /// selection == PredictAbsent: predict samples whose weight are zero
+  /// Predict samples in a dataset by probability in classification task
+  /// filter == PredictAll: predict all samples
+  /// filter == PredictPresent: predict samples whose weight are nonzero
+  /// filter == PredictAbsent: predict samples whose weight are zero
   virtual vec_vec_dbl_t PredictBatchByProbability(const Dataset *dataset,
                                                   const uint32_t filter = PredictAll);
 
  protected:
-  /// Classification Tree
   const ClassificationStoredTree *class_tree;
-
-  /// Regression Tree
   const RegressionStoredTree *regress_tree;
 
-  /// Whether to predict based on the selection argument passed to the PredictSelect... public functions
   bool ToPredict(const vec_uint32_t &sample_weights,
                  const uint32_t idx,
                  const uint32_t selection);
-
-  /// Determine which path, left or right, the sample takes to move down the decision tree
   int32_t NextNode(const StoredTree *tree,
                    const Dataset *dataset,
                    int32_t cell_id,

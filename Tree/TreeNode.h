@@ -15,24 +15,9 @@
 
 class TreeNode {
  public:
-  TreeNode():
-          node_id(0), type(0), depth(0), cell_id(0),
-          parent(nullptr), left(nullptr), right(nullptr), left_child_processed(false), right_child_processed(false),
-          subset(nullptr), split_info(nullptr), stats(nullptr) {}
-
   explicit TreeNode(const Dataset *dataset):
-          node_id(0), type(IsRootType), depth(1), cell_id(0),
-          parent(nullptr), left(nullptr), right(nullptr), left_child_processed(false), right_child_processed(false),
-          subset(std::make_unique<Subdataset>(dataset)), split_info(nullptr), stats(nullptr) {}
-
-  TreeNode(uint32_t node_id,
-           uint32_t type,
-           TreeNode *parent):
-          node_id(node_id), type(type), depth(parent->depth + 1), cell_id(0),
-          parent(parent), left(nullptr), right(nullptr), left_child_processed(false), right_child_processed(false),
-          subset(nullptr), split_info(nullptr), stats(nullptr) {}
-
-  virtual ~TreeNode() = default;
+    type(IsRootType), depth(1), parent(nullptr), left(nullptr), right(nullptr), left_child_processed(false),
+    right_child_processed(false), subset(std::make_unique<Subdataset>(dataset)), split_info(nullptr), stats(nullptr) {}
 
   void SetStats(const Dataset *dataset,
                 const uint32_t cost_function) {
@@ -46,8 +31,6 @@ class TreeNode {
 
   void DiscardTemporaryElements() {
     subset->DiscardTemporaryElements();
-    stats.reset();
-    split_info.reset();
   }
 
   void DiscardSortedIdx(uint32_t feature_idx) {
@@ -58,20 +41,16 @@ class TreeNode {
     subset.reset();
   }
 
-  uint32_t NodeId() const {
-    return node_id;
-  }
-
   bool IsRoot() const {
-    return (type & IsRootType) > 0;
+    return type == IsRootType;
   }
 
   bool IsLeftChild() const {
-    return (type & IsLeftChildType) > 0;
+    return type == IsLeftChildType;
   }
 
   bool IsRightChild() const {
-    return (type & IsRightChildType) > 0;
+    return type == IsRightChildType;
   }
 
   uint32_t Size() const {
@@ -82,30 +61,16 @@ class TreeNode {
     return depth;
   }
 
-  uint32_t CellId() const {
-    return cell_id;
-  }
-
-  void SetCellId(uint32_t cell_id) {
-    this->cell_id = cell_id;
-  }
-
   TreeNode *Parent() const {
     return parent;
   }
 
   TreeNode *Left() const {
-    return left;
+    return left.get();
   }
 
   TreeNode *Right() const {
-    return right;
-  }
-
-  void LinkChildren(TreeNode *left_child,
-                    TreeNode *right_child) {
-    left = left_child;
-    right = right_child;
+    return right.get();
   }
 
   bool LeftChildProcessed() const {
@@ -128,13 +93,13 @@ class TreeNode {
     return subset.get();
   }
 
-  void PartitionSubset(const Dataset *dataset,
-                       TreeNode *left,
-                       TreeNode *right) {
+  void SpawnChildren(const Dataset *dataset) {
+    left.reset(new TreeNode(IsLeftChildType, this));
+    right.reset(new TreeNode(IsRightChildType, this));
     subset->Partition(dataset->Features(split_info->feature_idx), split_info.get(), left->subset, right->subset);
   }
 
-  SplitInfo *Split() {
+  SplitInfo *Split() const {
     return split_info.get();
   }
 
@@ -143,17 +108,20 @@ class TreeNode {
   }
 
  private:
-  uint32_t node_id;
   uint32_t type;
   uint32_t depth;
-  uint32_t cell_id;
   TreeNode *parent;
-  TreeNode *left;
-  TreeNode *right;
+  std::unique_ptr<TreeNode> left;
+  std::unique_ptr<TreeNode> right;
   bool left_child_processed;
   bool right_child_processed;
   std::unique_ptr<Subdataset> subset;
   std::unique_ptr<SplitInfo> split_info;
   std::unique_ptr<NodeStats> stats;
+
+  TreeNode(uint32_t type,
+           TreeNode *parent):
+    type(type), depth(parent->depth + 1), parent(parent), left(nullptr), right(nullptr), left_child_processed(false),
+    right_child_processed(false), subset(nullptr), split_info(nullptr), stats(nullptr) {}
 };
 #endif

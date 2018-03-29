@@ -14,6 +14,7 @@ class ForestTrainer {
                 uint32_t min_leaf_node,
                 uint32_t min_split_node,
                 uint32_t max_depth,
+                uint32_t max_num_nodes,
                 uint32_t random_state,
                 uint32_t num_threads,
                 uint32_t num_trees):
@@ -25,8 +26,8 @@ class ForestTrainer {
     tree_trainers.reserve(num_trees);
     for (uint32_t tree_id = 0; tree_id != num_trees; ++tree_id)
       tree_trainers.emplace_back(std::make_unique<TreeTrainer>(cost_function, num_features_for_split, min_leaf_node,
-                                                               min_split_node, max_depth, random_state + tree_id,
-                                                               num_threads));
+                                                               min_split_node, max_depth, max_num_nodes,
+                                                               random_state + tree_id, num_threads));
   };
   void LoadData(Dataset *dataset);
   void Train(bool to_report);

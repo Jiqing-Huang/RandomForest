@@ -7,17 +7,14 @@
 #include <mutex>
 
 #include "../Global/GlobalConsts.h"
-
-using std::vector;
-using std::mutex;
-using std::unique_lock;
+#include "../Generics/TypeDefs.h"
 
 class SplitInfo {
 
   union Info {
     float float_type;
     uint32_t uint32_type;
-    vector<uint32_t> *ptr_type;
+    vec_uint32_t *ptr_type;
   };
 
  public:
@@ -38,40 +35,34 @@ class SplitInfo {
     }
   };
 
-  void UpdateFloat(bool is_synchronized,
-                   double gain,
+  void UpdateFloat(double gain,
                    uint32_t type,
                    uint32_t feature_idx,
                    float value) {
-    if (is_synchronized) {
-      SafeUpdateFloat(gain, type, feature_idx, value);
-    } else {
-      UnsafeUpdateFloat(gain, type, feature_idx, value);
-    }
+    std::unique_lock<std::mutex> lock(updating);
+    ++num_updates;
+    if (UpdateGeneral(gain, type, feature_idx))
+      this->info.float_type = value;
   }
 
-  void UpdateUInt(bool is_synchronized,
-                  double gain,
+  void UpdateUInt(double gain,
                   uint32_t type,
                   uint32_t feature_idx,
-                  uint32_t value) {
-    if (is_synchronized) {
-      SafeUpdateUInt(gain, type, feature_idx, value);
-    } else {
-      UnsafeUpdateUInt(gain, type, feature_idx, value);
-    }
+                  uint32_t uint32_info) {
+    std::unique_lock<std::mutex> lock(updating);
+    ++num_updates;
+    if (UpdateGeneral(gain, type, feature_idx))
+      this->info.uint32_type = uint32_info;
   }
 
-  void UpdatePtr(bool is_synchronized,
-                 double gain,
+  void UpdatePtr(double gain,
                  uint32_t type,
                  uint32_t feature_idx,
-                 const vector<uint32_t> &value) {
-    if (is_synchronized) {
-      SafeUpdatePtr(gain, type, feature_idx, value);
-    } else {
-      UnsafeUpdatePtr(gain, type, feature_idx, value);
-    }
+                 const vec_uint32_t &categorical_bitmask) {
+    std::unique_lock<std::mutex> lock(updating);
+    ++num_updates;
+    if (UpdateGeneral(gain, type, feature_idx))
+      this->info.ptr_type = new vec_uint32_t(categorical_bitmask);
   }
 
   void FinishUpdate() {
@@ -89,60 +80,7 @@ class SplitInfo {
   }
 
  private:
-
-  mutex updating;
-
-  void UnsafeUpdateFloat(double gain,
-                         uint32_t type,
-                         uint32_t feature_idx,
-                         float value) {
-    if (UpdateGeneral(gain, type, feature_idx))
-      this->info.float_type = value;
-  }
-
-  void SafeUpdateFloat(double gain,
-                       uint32_t type,
-                       uint32_t feature_idx,
-                       float value) {
-    unique_lock<mutex> lock(updating);
-    ++num_updates;
-    UnsafeUpdateFloat(gain, type, feature_idx, value);
-  }
-
-
-  void UnsafeUpdateUInt(double gain,
-                        uint32_t type,
-                        uint32_t feature_idx,
-                        uint32_t uint32_info) {
-    if (UpdateGeneral(gain, type, feature_idx))
-      this->info.uint32_type = uint32_info;
-  }
-
-  void SafeUpdateUInt(double gain,
-                      uint32_t type,
-                      uint32_t feature_idx,
-                      uint32_t uint32_info) {
-    unique_lock<mutex> lock(updating);
-    ++num_updates;
-    UnsafeUpdateUInt(gain, type, feature_idx, uint32_info);
-  }
-
-  void UnsafeUpdatePtr(double gain,
-                       uint32_t type,
-                       uint32_t feature_idx,
-                       const vector<uint32_t> &categorical_bitmask) {
-    if (UpdateGeneral(gain, type, feature_idx))
-      this->info.ptr_type = new vector<uint32_t>(categorical_bitmask);
-  }
-
-  void SafeUpdatePtr(double gain,
-                     uint32_t type,
-                     uint32_t feature_idx,
-                     const vector<uint32_t> &categorical_bitmask) {
-    unique_lock<mutex> lock(updating);
-    ++num_updates;
-    UnsafeUpdatePtr(gain, type, feature_idx, categorical_bitmask);
-  }
+  std::mutex updating;
 
   bool UpdateGeneral(double gain,
                      uint32_t type,
@@ -158,6 +96,5 @@ class SplitInfo {
     return true;
   }
 };
-
 
 #endif

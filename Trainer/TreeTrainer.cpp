@@ -1,28 +1,22 @@
 
 #include "TreeTrainer.h"
-#include "../TreeBuilder/TreeBuilder.h"
-#include "../TreeBuilder/ParallelTreeBuilder.h"
-#include "../Predictor/TreePredictor.h"
 #include "../Predictor/ParallelTreePredictor.h"
-#include "../Tree/StoredTree.h"
-#include <iostream>
 
 TreeTrainer::TreeTrainer(uint32_t cost_function,
                          uint32_t num_features_for_split,
                          uint32_t min_leaf_node,
                          uint32_t min_split_node,
                          uint32_t max_depth,
+                         uint32_t max_num_nodes,
                          uint32_t random_state,
                          uint32_t num_threads):
   dataset(nullptr), cost_function(cost_function), train_accuracy(0.0), train_loss(0.0),
-  init_loss(0.0), final_loss(0.0), relative_loss_reduction(0.0), feature_importance(), training_time(0.0) {
+  init_loss(0.0), final_loss(0.0), relative_loss_reduction(0.0), feature_importance(), training_time(0.0),
+  driver(std::make_unique<SingleTreeBuildDriver>(cost_function, min_leaf_node, min_split_node, num_features_for_split,
+                                                 random_state, num_threads, max_num_nodes, max_depth)) {
   if (num_threads == 1) {
-    tree_builder = std::make_unique<TreeBuilder>(cost_function, min_leaf_node, min_split_node, max_depth,
-                                                 num_features_for_split, random_state);
     tree_predictor = std::make_unique<TreePredictor>();
   } else {
-    tree_builder = std::make_unique<ParallelTreeBuilder>(cost_function, min_leaf_node, min_split_node, max_depth,
-                                                         num_features_for_split, random_state, num_threads);
     tree_predictor = std::make_unique<ParallelTreePredictor>(num_threads);
   }
   if (cost_function == GiniImpurity || cost_function == Entropy)
@@ -46,8 +40,9 @@ void TreeTrainer::LoadDefaultSampleWeights() {
 
 void TreeTrainer::Train(bool to_report = true) {
   auto begin = std::chrono::high_resolution_clock::now();
-  tree_builder->LoadDataSet(*dataset);
-  tree_builder->Build(*tree);
+  driver->LoadDataset(dataset);
+  driver->LoadTree(tree.get());
+  driver->Build();
 
   init_loss = tree->init_loss;
   final_loss = tree->final_loss;
@@ -129,7 +124,7 @@ void TreeTrainer::ClearOutput() {
 }
 
 void TreeTrainer::ClearBuilder() {
-  tree_builder.reset();
+  driver.reset();
   tree_predictor.reset();
 }
 

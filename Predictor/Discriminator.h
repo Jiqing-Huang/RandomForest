@@ -5,8 +5,8 @@
 #include "../Global/GlobalConsts.h"
 #include "../Generics/TypeDefs.h"
 
-/// Discriminators that decide which path a sample should go at a tree node
-/// One of these a selected at runtime based on split type to partition the subset that the tree node holds
+/// Discriminators that decide which path a sample should go through a tree node
+/// One of these is selected at runtime based on split type
 
 template <typename feature_t, std::enable_if_t<!std::is_integral<feature_t>::value, void*> = nullptr>
 class ContinuousDiscriminator {
